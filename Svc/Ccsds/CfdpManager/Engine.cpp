@@ -164,7 +164,11 @@ void Engine::dispatchRecv(Transaction* txn, const Fw::Buffer& buffer) {
         }
     }
 
-    this->armInactTimer(txn);  // whenever a packet was received by the other size, always arm its inactivity timer
+    // Whenever a packet was received from the other side, re-arm its inactivity timer, unless the
+    // transaction was abandoned during dispatch and already sits on the FREE queue
+    if (txn->m_flags.com.q_index != QueueId::FREE) {
+        this->armInactTimer(txn);
+    }
 }
 
 void Engine::dispatchTx(Transaction* txn) {
@@ -646,14 +650,36 @@ bool Engine::recvInit(Transaction* txn, const Fw::Buffer& buffer) {
             }
         }
 
-        if (txn->m_state == TxnState::TXN_STATE_INIT) {
-            // state was not changed, so free the transaction
-            this->finishTransaction(txn, false);
-        }
     } else {
         m_manager->log_WARNING_LO_FailPduHeaderDeserialization(txn->getChannelId(), status);
     }
+
+    if (txn->m_state == TxnState::TXN_STATE_INIT) {
+        if (TxnStatusIsError(txn->m_history->txn_stat)) {
+            // A transfer was identified and refused (e.g. destination path rejected). Report
+            // it as a failed reception and park the slot in HOLD so the inactivity timer
+            // recycles it, as for any other failed transaction.
+            this->finishTransaction(txn, false);
+        } else {
+            // The PDU could not start a transaction, so nothing was transferred. Release the
+            // slot now rather than routing through finishTransaction(), which would report a
+            // completed transfer and park the slot in HOLD until the inactivity timer expires.
+            // Holding slots for PDUs that never start a transaction lets a stream of stray
+            // PDUs exhaust the pool shared with commanded transmit transactions.
+            this->abandonInitTransaction(txn);
+        }
+    }
     return false;  // No re-dispatch needed
+}
+
+void Engine::abandonInitTransaction(Transaction* txn) {
+    FW_ASSERT(txn != nullptr);
+    FW_ASSERT(txn->m_state == TxnState::TXN_STATE_INIT, static_cast<FwAssertArgType>(txn->m_state));
+    FW_ASSERT(txn->m_chan != nullptr);
+
+    txn->m_chan->clearCurrentIfMatch(txn);
+    // Returns chunk list and history, then places the transaction back on the FREE queue
+    txn->m_chan->recycleTransaction(txn);
 }
 
 void Engine::receivePdu(U8 chan_id, const Fw::Buffer& buffer) {
@@ -778,7 +804,9 @@ Status::T Engine::abandonTransaction(U8 channelId, TransactionSeq transactionSeq
     Channel* chan = m_channels[channelId];
     Transaction* txn = chan->findTransactionBySequenceNumber(transactionSeq, entityId);
 
-    if (txn != nullptr) {
+    // A finished transaction stays findable in HOLD until its inactivity timer recycles it.
+    // There is nothing left to abandon, so report it the same as a transaction that is not found.
+    if ((txn != nullptr) && (txn->m_state != TxnState::TXN_STATE_HOLD)) {
         this->finishTransaction(txn, false);
         status = Status::SUCCESS;
     }
@@ -857,18 +885,17 @@ Transaction* Engine::startRxTransaction(U8 chan_num) {
     FW_ASSERT(chan_num < Cfdp::NumChannels, chan_num, Cfdp::NumChannels);
     chan = m_channels[chan_num];
 
-    // if (CF_AppData.hk.Payload.channel_hk[chan_num].q_size[QueueId::RX] < CF_MAX_SIMULTANEOUS_RX)
-    // {
-    //     txn = chan->findUnusedTransaction(Direction::DIRECTION_RX);
-    // }
-    // else
-    // {
-    //     txn = nullptr;
-    // }
-    // Receive transactions are limited by MaxRxTransactions parameter
-    txn = chan->findUnusedTransaction(Direction::DIRECTION_RX);
+    // Bound concurrent receive transactions. The transaction pool is shared with commanded
+    // transmit work and sized for MaxSimultaneousRx receive transactions, so without this
+    // bound inbound traffic alone can consume every slot and block commanded transfers.
+    if (chan->getNumRx() < MaxSimultaneousRx) {
+        txn = chan->findUnusedTransaction(Direction::DIRECTION_RX);
+    } else {
+        txn = nullptr;
+    }
 
     if (txn != nullptr) {
+        chan->incrementRxCounter();
         // set default FIN status
         txn->m_state_data.receive.r2.dc = FinDeliveryCode::FIN_DELIVERY_CODE_INCOMPLETE;
         txn->m_state_data.receive.r2.fs = FinFileStatus::FIN_FILE_STATUS_DISCARDED;
@@ -1042,6 +1069,13 @@ void Engine::finishTransaction(Transaction* txn, bool keep_history) {
         return;
     }
 
+    // A transaction in HOLD has already been finished and is waiting for its inactivity timer
+    // to recycle it. Finishing it again would repeat the completion bookkeeping (the commanded
+    // TX and playback counters, completion events, and the port notification), so do nothing.
+    if (txn->m_state == TxnState::TXN_STATE_HOLD) {
+        return;
+    }
+
     // this should always be
     FW_ASSERT(txn->m_chan != nullptr);
 
@@ -1049,10 +1083,16 @@ void Engine::finishTransaction(Transaction* txn, bool keep_history) {
     // so the tick processor will stop trying to actively transmit something -
     // it should move on to the next transaction.
     //
+    // A TX transaction still waiting on PEND (queued behind another downlink, or held
+    // because dequeue is disabled) must also be moved to TXW. PEND is never ticked, so
+    // the inactivity timer armed below could never recycle it, and cycleTx would later
+    // promote the HOLD transaction to TXA where dispatchTx has no handler for it and
+    // cycleTxFirstActive would never leave its dispatch loop.
+    //
     // RX transactions can stay on the RX queue, that does not hurt anything
     // because they are only triggered when a PDU comes in matching that seq_num
     // (RX queue is not separated into A/W parts)
-    if (txn->m_flags.com.q_index == QueueId::TXA) {
+    if (txn->m_flags.com.q_index == QueueId::TXA || txn->m_flags.com.q_index == QueueId::PEND) {
         txn->m_chan->dequeueTransaction(txn);
         txn->m_chan->insertSortPrio(txn, QueueId::TXW);
     }

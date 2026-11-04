@@ -1457,6 +1457,100 @@ TEST_F(FpySequencerTester, ziext_16_64_underflow) {
 TEST_F(FpySequencerTester, ziext_32_64_underflow) {
     ASSERT_EQ(tester_op_ziext_32_64(), DirectiveError::STACK_UNDERFLOW);
 }
+
+// ======================================================================
+// Widening op stack overflow tests (fpext, siext, ziext). These pop a
+// narrow value and push a wider one, so with the narrow operand at the top
+// of a full stack the result does not fit. The op must report
+// STACK_OVERFLOW and leave the stack unchanged rather than assert.
+// ======================================================================
+
+TEST_F(FpySequencerTester, fpext_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(F32);
+    tester_push<F32>(1.5f);
+    ASSERT_EQ(tester_op_fpext(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<F32>(), 1.5f);
+
+    // Exactly enough room for the wider result succeeds
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(F64);
+    tester_push<F32>(1.5f);
+    ASSERT_EQ(tester_op_fpext(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<F64>(), 1.5);
+}
+TEST_F(FpySequencerTester, siext_8_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I8);
+    tester_push<I8>(-42);
+    ASSERT_EQ(tester_op_siext_8_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<I8>(), -42);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I64);
+    tester_push<I8>(-42);
+    ASSERT_EQ(tester_op_siext_8_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<I64>(), -42);
+}
+TEST_F(FpySequencerTester, siext_16_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I16);
+    tester_push<I16>(-1000);
+    ASSERT_EQ(tester_op_siext_16_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<I16>(), -1000);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I64);
+    tester_push<I16>(-1000);
+    ASSERT_EQ(tester_op_siext_16_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<I64>(), -1000);
+}
+TEST_F(FpySequencerTester, siext_32_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I32);
+    tester_push<I32>(-100000);
+    ASSERT_EQ(tester_op_siext_32_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<I32>(), -100000);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(I64);
+    tester_push<I32>(-100000);
+    ASSERT_EQ(tester_op_siext_32_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<I64>(), -100000);
+}
+TEST_F(FpySequencerTester, ziext_8_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U8);
+    tester_push<U8>(200);
+    ASSERT_EQ(tester_op_ziext_8_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<U8>(), 200);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U64);
+    tester_push<U8>(200);
+    ASSERT_EQ(tester_op_ziext_8_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<U64>(), 200);
+}
+TEST_F(FpySequencerTester, ziext_16_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U16);
+    tester_push<U16>(60000);
+    ASSERT_EQ(tester_op_ziext_16_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<U16>(), 60000);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U64);
+    tester_push<U16>(60000);
+    ASSERT_EQ(tester_op_ziext_16_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<U64>(), 60000);
+}
+TEST_F(FpySequencerTester, ziext_32_64_overflow) {
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U32);
+    tester_push<U32>(4000000000U);
+    ASSERT_EQ(tester_op_ziext_32_64(), DirectiveError::STACK_OVERFLOW);
+    ASSERT_EQ(tester_get_m_runtime_ptr()->stack.size, Fpy::MAX_STACK_SIZE);
+    ASSERT_EQ(tester_pop<U32>(), 4000000000U);
+
+    tester_get_m_runtime_ptr()->stack.size = Fpy::MAX_STACK_SIZE - sizeof(U64);
+    tester_push<U32>(4000000000U);
+    ASSERT_EQ(tester_op_ziext_32_64(), DirectiveError::NO_ERROR);
+    ASSERT_EQ(tester_pop<U64>(), 4000000000U);
+}
 TEST_F(FpySequencerTester, itrunc_64_8_underflow) {
     ASSERT_EQ(tester_op_itrunc_64_8(), DirectiveError::STACK_UNDERFLOW);
 }
@@ -3684,6 +3778,80 @@ TEST_F(FpySequencerTester, cmd_DUMP_STACK_TO_FILE_openErrorLogsDumpFileName) {
                         Fw::CmdResponse::EXECUTION_ERROR);
     ASSERT_EVENTS_FileOpenError_SIZE(1);
     ASSERT_EQ(this->eventHistory_FileOpenError->at(0).filePath, Fw::LogStringArg("nonexistent_dir/dump.bin"));
+}
+
+TEST_F(FpySequencerTester, validate_sandbox) {
+    // with no sandbox configured, any path is allowed
+    add_NO_OP();
+    writeToFile("test.bin");
+    U8 data[Fpy::Sequence::SERIALIZED_SIZE] = {0};
+    tester_get_m_sequenceBuffer_ptr()->setExtBuffer(data, sizeof(data));
+    tester_set_m_sequenceFilePath("test.bin");
+    ASSERT_EQ(tester_validate(), Fw::Success::SUCCESS);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(0);
+
+    // a sequence inside the sandbox validates normally
+    cmp.configureSandbox(".");
+    tester_get_m_sequenceBuffer_ptr()->resetSer();
+    ASSERT_EQ(tester_validate(), Fw::Success::SUCCESS);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(0);
+
+    // a sequence outside the sandbox is rejected before it is opened
+    cmp.configureSandbox("sandbox_dir");
+    tester_get_m_sequenceBuffer_ptr()->resetSer();
+    this->clearHistory();
+    ASSERT_EQ(tester_validate(), Fw::Success::FAILURE);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(1);
+    ASSERT_EQ(this->eventHistory_FileOutsideSandbox->at(0).filePath, Fw::LogStringArg("test.bin"));
+    ASSERT_EVENTS_FileOpenError_SIZE(0);
+
+    // a ".." segment that resolves outside the sandbox is rejected too
+    cmp.configureSandbox(".");
+    tester_set_m_sequenceFilePath("../test.bin");
+    this->clearHistory();
+    ASSERT_EQ(tester_validate(), Fw::Success::FAILURE);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(1);
+    ASSERT_EVENTS_FileOpenError_SIZE(0);
+    removeFile("test.bin");
+}
+
+TEST_F(FpySequencerTester, cmd_DUMP_STACK_TO_FILE_sandbox) {
+    // DUMP_STACK_TO_FILE writes a file named by the command; outside the sandbox it is
+    // rejected before the file is opened
+    allocMem();
+    add_PUSH_VAL<U8>(0x00);
+    add_PUSH_VAL<U8>(0x11);
+    add_PUSH_VAL<U8>(0x22);
+    writeAndRun();
+
+    // pause before the end so we land in RUNNING_PAUSED
+    tester_get_m_breakpoint_ptr()->breakpointInUse = true;
+    tester_get_m_breakpoint_ptr()->breakpointIndex = 3;
+    dispatchUntilState(State::RUNNING_PAUSED);
+
+    cmp.configureSandbox(".");
+    removeFile("../sandbox_dump.bin");
+    this->clearHistory();
+    sendCmd_DUMP_STACK_TO_FILE(0, 0, Fw::String("../sandbox_dump.bin"));
+    dispatchCurrentMessages(cmp);
+
+    ASSERT_CMD_RESPONSE_SIZE(1);
+    ASSERT_CMD_RESPONSE(0, Svc::FpySequencerTester::get_OPCODE_DUMP_STACK_TO_FILE(), 0,
+                        Fw::CmdResponse::EXECUTION_ERROR);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(1);
+    ASSERT_EQ(this->eventHistory_FileOutsideSandbox->at(0).filePath, Fw::LogStringArg("../sandbox_dump.bin"));
+    ASSERT_EVENTS_FileOpenError_SIZE(0);
+    Os::File outputFile;
+    ASSERT_NE(outputFile.open("../sandbox_dump.bin", Os::FileInterface::Mode::OPEN_READ), Os::File::Status::OP_OK)
+        << "Dump file outside the sandbox must not be created";
+
+    // inside the sandbox the dump still succeeds
+    this->clearHistory();
+    sendCmd_DUMP_STACK_TO_FILE(0, 0, Fw::String("sandbox_dump.bin"));
+    dispatchCurrentMessages(cmp);
+    ASSERT_CMD_RESPONSE(0, Svc::FpySequencerTester::get_OPCODE_DUMP_STACK_TO_FILE(), 0, Fw::CmdResponse::OK);
+    ASSERT_EVENTS_FileOutsideSandbox_SIZE(0);
+    removeFile("sandbox_dump.bin");
 }
 
 TEST_F(FpySequencerTester, prmSeqBaseDirTlm) {
